@@ -411,3 +411,16 @@ class OperationalSpaceController(Controller):
     @property
     def name(self):
         return "OSC_" + self.name_suffix
+    
+    def set_kp(self, kp):
+        """
+        Sets the proportional gain kp for this controller
+
+        Args:
+            kp (float or Iterable of float): positional gain for determining desired torques based upon the pos / ori error.
+                Can be either be a scalar (same value for all action dims), or a list (specific values for each dim)
+        """
+        self.kp = self.nums2array(kp, 6)
+        if self.impedance_mode == "fixed":
+            # only update kd if in fixed mode
+            self.kd = 2 * np.sqrt(self.kp) * (self.kd / (2 * np.sqrt(self.kp)))  # preserve damping ratio

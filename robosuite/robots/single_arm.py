@@ -269,7 +269,8 @@ class SingleArm(Manipulator):
             self.recent_ee_forcetorques.push(np.concatenate((self.ee_force, self.ee_torque)))
             self.recent_ee_pose.push(np.concatenate((self.controller.ee_pos, T.mat2quat(self.controller.ee_ori_mat))))
             self.recent_ee_vel.push(np.concatenate((self.controller.ee_pos_vel, self.controller.ee_ori_vel)))
-
+            # print(self.torques, " Torques")
+            # print(self.controller.goal_pos, " Goal Pos")
             # Estimation of eef acceleration (averaged derivative of recent velocities)
             self.recent_ee_vel_buffer.push(np.concatenate((self.controller.ee_pos_vel, self.controller.ee_ori_vel)))
             diffs = np.vstack(
