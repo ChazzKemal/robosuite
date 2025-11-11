@@ -151,6 +151,10 @@ class MujocoEnv(metaclass=EnvMeta):
         # check if viewer has get observations method and set a flag for future use.
         self.viewer_get_obs = hasattr(self.viewer, "_get_observations")
 
+
+        self.exhaust_speed = 1.0  # Default action exhaust speed
+
+
     def initialize_renderer(self):
         self.renderer = self.renderer.lower()
 
@@ -388,15 +392,15 @@ class MujocoEnv(metaclass=EnvMeta):
 
         # Loop through the simulation at the model timestep rate until we're ready to take the next policy step
         # (as defined by the control frequency specified at the environment level)
-        for i in range(int(self.control_timestep / self.model_timestep)):
+        for i in range(int(self.control_timestep / self.model_timestep/self.exhaust_speed)):
             self.sim.forward()
             self._pre_action(action, policy_step)
             self.sim.step()
             self._update_observables()
             policy_step = False
-
-        # Note: this is done all at once to avoid floating point inaccuracies
-        self.cur_time += self.control_timestep
+        self.set_action_exhaust_speed(1.0)  # reset exhaust speed to default after step
+        # Note: this is done all at once to avoid floating point inaccuracies # i made it better
+        self.cur_time += self.model_timestep* int(self.control_timestep / self.model_timestep/self.exhaust_speed)
 
         reward, done, info = self._post_action(action)
 
@@ -735,3 +739,11 @@ class MujocoEnv(metaclass=EnvMeta):
             int: Action space dimension
         """
         raise NotImplementedError
+    
+    def set_action_exhaust_speed(self, speed):
+        """
+        Sets the action exhaust speed of the environment's robot(s).
+        Args:
+            speed (float): New action exhaust speed to set
+        """
+        self.exhaust_speed = speed
