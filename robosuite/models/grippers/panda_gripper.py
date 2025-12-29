@@ -57,9 +57,17 @@ class PandaGripper(PandaGripperBase):
         )
         return self.current_action
 
+    def __init__(self, idn=0):
+        super().__init__(idn=idn)
+        self._speed = 0.01
+
     @property
     def speed(self):
-        return 0.01
+        return self._speed
+
+    @speed.setter
+    def speed(self, value):
+        self._speed = value
 
     @property
     def dof(self):
