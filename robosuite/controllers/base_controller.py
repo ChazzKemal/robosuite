@@ -172,6 +172,16 @@ class Controller(object, metaclass=abc.ABCMeta):
         """
         pass
 
+    def update_interpolation_scale(self, scale):
+        """
+        Optional function to implement in subclass controllers that will update the interpolation scale
+        based on the simulation speed.
+
+        Args:
+            scale (float): Speedup factor (e.g. 1.0 = normal, 2.0 = 2x speed)
+        """
+        pass
+
     def update_initial_joints(self, initial_joints):
         """
         Updates the internal attribute self.initial_joints. This is useful for updating changes in controller-specific

@@ -50,6 +50,10 @@ class Robotiq85Gripper(Robotiq85GripperBase):
     1-DoF variant of RobotiqGripperBase.
     """
 
+    def __init__(self, idn=0):
+        super().__init__(idn=idn)
+        self._speed = 0.01
+
     def format_action(self, action):
         """
         Maps continuous action into binary output
@@ -67,7 +71,11 @@ class Robotiq85Gripper(Robotiq85GripperBase):
 
     @property
     def speed(self):
-        return 0.01
+        return self._speed
+
+    @speed.setter
+    def speed(self, value):
+        self._speed = value
 
     @property
     def dof(self):
