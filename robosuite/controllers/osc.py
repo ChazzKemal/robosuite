@@ -155,7 +155,9 @@ class OperationalSpaceController(Controller):
 
         # kp kd
         self.kp = self.nums2array(kp, 6)
+        self.kp_scale = 1
         self.kd = 2 * np.sqrt(self.kp) * damping_ratio
+        self.kd_scale = 1 
 
         # kp and kd limits
         self.kp_min = self.nums2array(kp_limits[0], 6)
@@ -275,6 +277,24 @@ class OperationalSpaceController(Controller):
             )  # goal is the total orientation error
             self.relative_ori = np.zeros(3)  # relative orientation always starts at 0
 
+    def update_kp_scale(self, scale):
+        """
+        Updates the scaling factor for kp
+
+        Args:
+            kp_scale (float): scaling factor for kp
+        """
+        self.kp_scale = scale
+
+    def update_kd_scale(self, scale):
+        """
+        Updates the scaling factor for kd
+
+        Args:
+            kd_scale (float): scaling factor for kd
+        """
+        self.kd_scale = scale
+
     def run_controller(self):
         """
         Calculates the torques required to reach the desired setpoint.
@@ -316,17 +336,16 @@ class OperationalSpaceController(Controller):
         vel_pos_error = -self.ee_pos_vel
 
         # F_r = kp * pos_err + kd * vel_err
-        desired_force = np.multiply(np.array(position_error), np.array(self.kp[0:3])) + np.multiply(
-            vel_pos_error, self.kd[0:3]
+        desired_force = np.multiply(np.array(position_error), np.array(self.kp[0:3]) * self.kp_scale) + np.multiply(
+            vel_pos_error, self.kd[0:3] * self.kd_scale
         )
 
         vel_ori_error = -self.ee_ori_vel
 
         # Tau_r = kp * ori_err + kd * vel_err
-        desired_torque = np.multiply(np.array(ori_error), np.array(self.kp[3:6])) + np.multiply(
-            vel_ori_error, self.kd[3:6]
+        desired_torque = np.multiply(np.array(ori_error), np.array(self.kp[3:6]) * self.kp_scale) + np.multiply(
+            vel_ori_error, self.kd[3:6] * self.kd_scale
         )
-
         # Compute nullspace matrix (I - Jbar * J) and lambda matrices ((J * M^-1 * J^T)^-1)
         lambda_full, lambda_pos, lambda_ori, nullspace_matrix = opspace_matrices(
             self.mass_matrix, self.J_full, self.J_pos, self.J_ori
