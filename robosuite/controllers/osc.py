@@ -366,6 +366,13 @@ class OperationalSpaceController(Controller):
         # Calculate and add nullspace torques (nullspace_matrix^T * Gamma_null) to final torques
         # Note: Gamma_null = desired nullspace pose torques, assumed to be positional joint control relative
         #                     to the initial joint positions
+
+        extra_scale = float(self.kd_scale) - 1.0
+        if extra_scale > 0.0 and hasattr(self.sim.model, "dof_damping"):
+            dof_damping = np.asarray(self.sim.model.dof_damping[self.qvel_index], dtype=np.float64)
+            qvel = np.asarray(self.joint_vel, dtype=np.float64)
+            self.torques = self.torques - extra_scale * dof_damping * qvel
+
         self.torques += nullspace_torques(
             self.mass_matrix, nullspace_matrix, self.initial_joint, self.joint_pos, self.joint_vel
         )
