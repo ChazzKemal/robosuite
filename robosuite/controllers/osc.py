@@ -382,6 +382,79 @@ class OperationalSpaceController(Controller):
 
         return self.torques
 
+    def preview_torques(self, kp_scale=1.0, kd_scale=1.0):
+        """Compute torques at the given kp/kd scale *without* side effects.
+
+        This mirrors the logic of ``run_controller`` but does NOT modify
+        ``self.torques`` or call ``super().run_controller()``.  It is useful
+        for probing the torque magnitude before committing to a particular
+        speedup factor.
+
+        Args:
+            kp_scale (float): Proportional-gain scaling factor (speed²).
+            kd_scale (float): Derivative-gain scaling factor (speed).
+
+        Returns:
+            np.array: Predicted joint torques (7-dim for Panda).
+        """
+        self.update()
+
+        # --- position ---
+        if self.interpolator_pos is not None and self.interpolator_pos.order == 1:
+            desired_pos = self.interpolator_pos.get_interpolated_goal()
+        else:
+            desired_pos = np.array(self.goal_pos)
+
+        # --- orientation ---
+        if self.interpolator_ori is not None:
+            self.relative_ori = orientation_error(self.ee_ori_mat, self.ori_ref)
+            ori_error = self.interpolator_ori.get_interpolated_goal()
+        else:
+            desired_ori = np.array(self.goal_ori)
+            ori_error = orientation_error(desired_ori, self.ee_ori_mat)
+
+        position_error = desired_pos - self.ee_pos
+        vel_pos_error = -self.ee_pos_vel
+
+        desired_force = (
+            np.multiply(position_error, self.kp[0:3] * kp_scale)
+            + np.multiply(vel_pos_error, self.kd[0:3] * kd_scale)
+        )
+
+        vel_ori_error = -self.ee_ori_vel
+        desired_torque = (
+            np.multiply(ori_error, self.kp[3:6] * kp_scale)
+            + np.multiply(vel_ori_error, self.kd[3:6] * kd_scale)
+        )
+
+        lambda_full, lambda_pos, lambda_ori, nullspace_matrix = opspace_matrices(
+            self.mass_matrix, self.J_full, self.J_pos, self.J_ori
+        )
+
+        if self.uncoupling:
+            decoupled_wrench = np.concatenate([
+                np.dot(lambda_pos, desired_force),
+                np.dot(lambda_ori, desired_torque),
+            ])
+        else:
+            decoupled_wrench = np.dot(
+                lambda_full, np.concatenate([desired_force, desired_torque])
+            )
+
+        torques = np.dot(self.J_full.T, decoupled_wrench) + self.torque_compensation
+
+        extra_scale = float(kd_scale) - 1.0
+        if extra_scale > 0.0 and hasattr(self.sim.model, "dof_damping"):
+            dof_damping = np.asarray(self.sim.model.dof_damping[self.qvel_index], dtype=np.float64)
+            qvel = np.asarray(self.joint_vel, dtype=np.float64)
+            torques = torques - extra_scale * dof_damping * qvel
+
+        torques += nullspace_torques(
+            self.mass_matrix, nullspace_matrix, self.initial_joint, self.joint_pos, self.joint_vel
+        )
+
+        return torques
+
     def update_initial_joints(self, initial_joints):
         # First, update from the superclass method
         super().update_initial_joints(initial_joints)

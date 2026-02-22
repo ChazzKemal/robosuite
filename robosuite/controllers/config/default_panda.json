@@ -6,8 +6,8 @@
   "output_min": -0.5,
   "kp": 0.03,
   "velocity_limits": [
-    -10,
-    10
+    -2,
+    2
   ],
   "interpolation": null,
   "ramp_ratio": 0.2
