@@ -153,6 +153,8 @@ class MujocoEnv(metaclass=EnvMeta):
 
 
         self.exhaust_speed = 1.0  # Default action exhaust speed
+        self.ff_fb_time_override = None  # Override for time advancement in ff+fb mode
+        self.ff_fb_remainder_steps = 0  # Extra normal substeps after bridging loop
 
 
     def initialize_renderer(self):
@@ -392,7 +394,12 @@ class MujocoEnv(metaclass=EnvMeta):
 
         # Loop through the simulation at the model timestep rate until we're ready to take the next policy step
         # (as defined by the control frequency specified at the environment level)
-        for i in range(int(self.control_timestep / self.model_timestep/self.exhaust_speed)):
+        n_iters = int(self.control_timestep / self.model_timestep / self.exhaust_speed)
+        for i in range(n_iters):
+            # On the last iteration, absorb any remainder into this bridging step
+            if i == n_iters - 1 and self.ff_fb_remainder_steps > 0:
+                self._set_robots_ff_fb_skip_add(self.ff_fb_remainder_steps)
+                self.ff_fb_remainder_steps = 0
             self.sim.forward()
             self._pre_action(action, policy_step)
             self.sim.step()
@@ -400,7 +407,11 @@ class MujocoEnv(metaclass=EnvMeta):
             policy_step = False
         self.set_action_exhaust_speed(1.0)  # reset exhaust speed to default after step
         # Note: this is done all at once to avoid floating point inaccuracies # i made it better
-        self.cur_time += self.model_timestep* int(self.control_timestep / self.model_timestep/self.exhaust_speed)
+        if self.ff_fb_time_override is not None:
+            self.cur_time += self.ff_fb_time_override
+            self.ff_fb_time_override = None  # reset after use
+        else:
+            self.cur_time += self.model_timestep* int(self.control_timestep / self.model_timestep/self.exhaust_speed)
 
         reward, done, info = self._post_action(action)
 
@@ -747,3 +758,21 @@ class MujocoEnv(metaclass=EnvMeta):
             speed (float): New action exhaust speed to set
         """
         self.exhaust_speed = speed
+
+    def _set_robots_ff_fb_skip_add(self, extra):
+        """Add extra steps to ff_fb_skip_steps on all robot controllers for the last bridging substep."""
+        if hasattr(self, "robots"):
+            for robot in self.robots:
+                if hasattr(robot.controller, "ff_fb_skip_steps"):
+                    robot.controller.ff_fb_skip_steps += extra
+
+    def set_ff_fb_time_override(self, dt):
+        """Set a time override for feedforward+feedback mode.
+
+        When set, the next ``step()`` call will advance ``cur_time`` by *dt*
+        instead of computing time from the exhaust speed.
+
+        Args:
+            dt (float): Time in seconds to advance simulation clock.
+        """
+        self.ff_fb_time_override = dt

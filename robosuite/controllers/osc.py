@@ -201,6 +201,23 @@ class OperationalSpaceController(Controller):
         self.relative_ori = np.zeros(3)
         self.ori_ref = None
 
+        # Feedforward + feedback control state
+        self.ff_fb_mode = False
+        self.ff_fb_skip_steps = 0
+        self.ff_fb_model_dt = 0.002
+
+    def set_ff_fb_mode(self, enabled, skip_steps=0, model_dt=0.002):
+        """Enable/disable feedforward+feedback bridging control.
+
+        Args:
+            enabled (bool): Whether to use ff+fb mode.
+            skip_steps (int): Number of nominal steps to bridge (N).
+            model_dt (float): MuJoCo simulation timestep.
+        """
+        self.ff_fb_mode = enabled
+        self.ff_fb_skip_steps = skip_steps
+        self.ff_fb_model_dt = model_dt
+
     def set_goal(self, action, set_pos=None, set_ori=None):
         """
         Sets goal based on input @action. If self.impedance_mode is not "fixed", then the input will be parsed into the
@@ -295,6 +312,63 @@ class OperationalSpaceController(Controller):
         """
         self.kd_scale = scale
 
+    def _run_controller_ff_fb(self):
+        """Feedforward + feedback bridging controller.
+
+        Computes a single bridging torque that achieves the same state change
+        as N nominal OSC steps would, allowing the simulator to skip N-1
+        substeps while maintaining trajectory accuracy.
+
+        Returns:
+            np.array: Bridging torques for 1 MuJoCo step.
+        """
+        N = self.ff_fb_skip_steps
+        dt = self.ff_fb_model_dt
+
+        # Advance interpolators by N steps so they stay in sync
+        if self.interpolator_pos is not None:
+            for _ in range(N - 1):
+                self.interpolator_pos.get_interpolated_goal()
+        if self.interpolator_ori is not None:
+            for _ in range(N - 1):
+                self.interpolator_ori.get_interpolated_goal()
+
+        # Get nominal OSC torque (no gain scaling, includes gravity comp)
+        tau_ff = self.preview_torques(kp_scale=1.0, kd_scale=1.0)
+
+        # Current joint state
+        qdot = np.array(self.joint_vel)
+
+        # Joint-space acceleration under nominal torque
+        M_inv = np.linalg.inv(self.mass_matrix)
+        qddot = M_inv @ (tau_ff - self.torque_compensation)
+
+        # Bridging acceleration: a_bridge = 2*(N-1)*qdot/dt + N^2*qddot
+        # This ensures both position and velocity match the N-step prediction
+        a_bridge = 2.0 * (N - 1) * qdot / dt + (N ** 2) * qddot
+
+        # Bridging torque: tau = M @ a_bridge + qfrc_bias
+        tau_bridge = self.mass_matrix @ a_bridge + self.torque_compensation
+
+        # Safety: reduce N if torques exceed 95% of actuator limits
+        act_min, act_max = self.actuator_limits
+        safe_limit = 0.95
+        while N > 1:
+            if np.all(tau_bridge >= act_min * safe_limit) and np.all(tau_bridge <= act_max * safe_limit):
+                break
+            N -= 1
+            a_bridge = 2.0 * (N - 1) * qdot / dt + (N ** 2) * qddot
+            tau_bridge = self.mass_matrix @ a_bridge + self.torque_compensation
+
+        # Update the actual skip steps used (caller may want to know)
+        self.ff_fb_skip_steps = N
+
+        self.torques = tau_bridge
+        # Let base class clamp torques
+        super().run_controller()
+
+        return self.torques
+
     def run_controller(self):
         """
         Calculates the torques required to reach the desired setpoint.
@@ -307,6 +381,10 @@ class OperationalSpaceController(Controller):
         Returns:
              np.array: Command torques
         """
+        # Delegate to ff+fb controller if enabled with skip > 1
+        if self.ff_fb_mode and self.ff_fb_skip_steps > 1:
+            return self._run_controller_ff_fb()
+
         # Update state
         self.update()
 
