@@ -343,25 +343,32 @@ class OperationalSpaceController(Controller):
         M_inv = np.linalg.inv(self.mass_matrix)
         qddot = M_inv @ (tau_ff - self.torque_compensation)
 
-        # Bridging acceleration: a_bridge = 2*(N-1)*qdot/dt + N^2*qddot
-        # This ensures both position and velocity match the N-step prediction
-        a_bridge = 2.0 * (N - 1) * qdot / dt + (N ** 2) * qddot
+        # Bridging acceleration for MuJoCo's semi-implicit Euler integrator.
+        # MuJoCo does: v_new = v + dt*a, q_new = q + dt*v_new
+        # After N steps of constant accel a:
+        #   q_N = q + N*dt*v + N*(N+1)/2 * dt² * a
+        # After 1 bridging step with a_bridge:
+        #   q_1 = q + dt*v + dt² * a_bridge
+        # Setting q_1 = q_N:
+        #   a_bridge = (N-1)*v/dt + N*(N+1)/2 * a
+        a_bridge = (N - 1) * qdot / dt + N * (N + 1) / 2.0 * qddot
 
         # Bridging torque: tau = M @ a_bridge + qfrc_bias
         tau_bridge = self.mass_matrix @ a_bridge + self.torque_compensation
 
-        # Safety: reduce N if torques exceed 95% of actuator limits
+        # Safety: reduce N if torques exceed 95% of actuator limits.
+        # Use a local variable so self.ff_fb_skip_steps is not modified —
+        # otherwise subsequent substeps in the same env.step() would
+        # inherit the reduced N even if their state allows higher N.
         act_min, act_max = self.actuator_limits
         safe_limit = 0.95
-        while N > 1:
+        N_safe = N
+        while N_safe > 1:
             if np.all(tau_bridge >= act_min * safe_limit) and np.all(tau_bridge <= act_max * safe_limit):
                 break
-            N -= 1
-            a_bridge = 2.0 * (N - 1) * qdot / dt + (N ** 2) * qddot
+            N_safe -= 1
+            a_bridge = (N_safe - 1) * qdot / dt + N_safe * (N_safe + 1) / 2.0 * qddot
             tau_bridge = self.mass_matrix @ a_bridge + self.torque_compensation
-
-        # Update the actual skip steps used (caller may want to know)
-        self.ff_fb_skip_steps = N
 
         self.torques = tau_bridge
         # Let base class clamp torques
